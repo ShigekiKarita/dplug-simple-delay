@@ -159,14 +159,13 @@ public:
             foreach (t; 0 .. frames)
             {
                 this.resetInterval();
-                b[0] = this._buffer[0].front;
-                b[1] = this._buffer[1].front;
-                this._buffer[0].pushBack(inputs[0][t] + b[0] * fbk);
-                this._buffer[1].pushBack(inputs[1][t] + b[1] * fbk);
-                outputs[0][t] = ((1.0 - r) * inputs[0][t] + r * b[0]) * SQRT1_2;
-                outputs[1][t] = ((1.0 - r) * inputs[1][t] + r * b[1]) * SQRT1_2;
-                this._buffer[0].popFront();
-                this._buffer[1].popFront();
+                foreach (ch; 0 .. 2)
+                {
+                    b[ch] = this._buffer[ch].front;
+                    this._buffer[ch].pushBack(inputs[ch][t] + b[ch] * fbk);
+                    outputs[ch][t] = ((1.0 - r) * inputs[ch][t] + r * b[ch]) * SQRT1_2;
+                    this._buffer[ch].popFront();
+                }
             }
         }
         else // bypass
