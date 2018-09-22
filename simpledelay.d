@@ -16,9 +16,24 @@ else
     mixin(VSTEntryPoint!SimpleDelay);
 }
 
+enum size_t maxChannels = 2;
+
 enum : int
 {
-    paramOnOff, paramDelayTimeSecond, paramDelayRatio
+    paramOnOff,
+    paramDelayTimeSecondL,
+    paramDelayTimeSecondR,
+    paramDelayDryWetRatio,
+    paramDelayFeedbackRatio,
+}
+
+auto floatValue(scope const Parameter p) nothrow @nogc
+{
+    if (auto f = cast(FloatParameter) p)
+    {
+        return f.value();
+    }
+    assert(false);
 }
 
 /// Simplest VST plugin you could make.
@@ -30,7 +45,7 @@ public:
 
     enum float maxDelayTimeSecond = 10;
     double _sampleRate;
-    size_t _currentDelayTimeFrame;
+    size_t[maxChannels] _currentDelayTimeFrame;
 
     @property maxDelayTimeFrame() nothrow @nogc
     {
@@ -43,29 +58,26 @@ public:
         return this._sampleRate;
     }
 
-    @property delayTimeSecond() nothrow @nogc
+    @property delayTimeSecond(size_t ch)() nothrow @nogc
     {
-        const p = this.param(paramDelayTimeSecond);
-        if (auto f = cast(FloatParameter) p) {
-            return f.value();
-        }
-        assert(false);
+        static assert(ch < maxChannels);
+        return this.param(paramDelayTimeSecondL + ch).floatValue;
     }
 
-    @property delayTimeFrame() nothrow @nogc
+    @property delayTimeFrame(size_t ch)() nothrow @nogc
     {
-        return cast(size_t) (this.delayTimeSecond * this.sampleRate);
+        return cast(size_t) (this.delayTimeSecond!ch * this.sampleRate);
     }
         
-    @property delayRatio() nothrow @nogc
+    @property delayDryWetRatio() nothrow @nogc
     {
-        const p = this.param(paramDelayRatio);
-        if (auto f = cast(FloatParameter) p) {
-            return f.value();
-        }
-        assert(false);
+        return this.param(paramDelayDryWetRatio).floatValue;
     }
 
+    @property delayFeedbackRatio() nothrow @nogc
+    {
+        return this.param(paramDelayFeedbackRatio).floatValue;
+    }
 
     override PluginInfo buildPluginInfo()
     {
@@ -80,10 +92,18 @@ public:
     {
         auto params = makeVec!Parameter();
         params.pushBack( mallocNew!BoolParameter(paramOnOff, "on/off", true) );
-        params.pushBack( mallocNew!LinearFloatParameter(paramDelayTimeSecond, "second", "",
-                                                     0.0, maxDelayTimeSecond, 0.1) );
-        params.pushBack( mallocNew!LinearFloatParameter(paramDelayRatio, "ratio", "",
+        params.pushBack( mallocNew!LinearFloatParameter(paramDelayTimeSecondL,
+                                                        "L-ch second", "",
+                                                        0.0, maxDelayTimeSecond, 0.1) );
+        params.pushBack( mallocNew!LinearFloatParameter(paramDelayTimeSecondR,
+                                                        "R-ch second", "",
+                                                        0.0, maxDelayTimeSecond, 0.1) );
+        params.pushBack( mallocNew!LinearFloatParameter(paramDelayDryWetRatio,
+                                                        "dry/wet ratio", "",
                                                         0.0, 1.0, 0.5) );
+        params.pushBack( mallocNew!LinearFloatParameter(paramDelayFeedbackRatio,
+                                                        "feedback ratio", "",
+                                                        0.0, 1.0, 0.0) );
         return params.releaseData();
     }
 
@@ -101,7 +121,7 @@ public:
 
     override float tailSizeInSeconds() nothrow @nogc
     {
-        return this.delayTimeSecond;
+        return fmax(this.delayTimeSecond!0, this.delayTimeSecond!1);
     }
     
     override void reset(double sampleRate, int maxFrames, int numInputs, int numOutputs) nothrow @nogc
@@ -111,30 +131,42 @@ public:
             this._sampleRate = sampleRate;
             this._buffer[0] = RingBuffer!float(this.maxDelayTimeFrame);
             this._buffer[1] = RingBuffer!float(this.maxDelayTimeFrame);
-            this._currentDelayTimeFrame = this.delayTimeFrame;
+            this.resetInterval();
         }
     }
 
+    void resetInterval() nothrow @nogc
+    {
+        static foreach (ch; 0..maxChannels)
+        {{
+            const f = this.delayTimeFrame!ch;
+            if (f != this._currentDelayTimeFrame[ch])
+            {
+                this._buffer[ch].setInterval(f);
+                this._currentDelayTimeFrame[ch] = f;
+            }
+        }}
+    }    
+
     override void processAudio(const(float*)[] inputs, float*[]outputs, int frames, TimeInfo info) nothrow @nogc
     {
-        const r = this.delayRatio;
-        const f = this.delayTimeFrame;
+        const r = this.delayDryWetRatio;
+        const fbk = this.delayFeedbackRatio;
+        
+        float[2] b;
         if (readBoolParamValue(paramOnOff))
         {
             foreach (t; 0 .. frames)
             {
-                if (f != this._currentDelayTimeFrame)
-                {
-                    this._buffer[0].setInterval(f);
-                    this._buffer[1].setInterval(f);
-                    this._currentDelayTimeFrame = f;
-                }
-                outputs[0][t] = ((1.0 - r) * inputs[0][t] + r * this._buffer[0].front) * SQRT1_2;
-                outputs[1][t] = ((1.0 - r) * inputs[1][t] + r * this._buffer[1].front) * SQRT1_2;
+                this.resetInterval();
+                b[0] = this._buffer[0].front;
+                b[1] = this._buffer[1].front;
+                this._buffer[0].pushBack(inputs[0][t] + b[0] * fbk);
+                this._buffer[1].pushBack(inputs[1][t] + b[1] * fbk);
+                outputs[0][t] = ((1.0 - r) * inputs[0][t] + r * b[0]) * SQRT1_2;
+                outputs[1][t] = ((1.0 - r) * inputs[1][t] + r * b[1]) * SQRT1_2;
                 this._buffer[0].popFront();
                 this._buffer[1].popFront();
-                this._buffer[0].pushBack(inputs[0][t]);
-                this._buffer[1].pushBack(inputs[1][t]);
             }
         }
         else // bypass
