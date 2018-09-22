@@ -1,0 +1,14 @@
+{
+    "$schema": "https://raw.githubusercontent.com/AuburnSounds/dplug/master/plugin-schema.json",
+
+    "vendorName": "No Name Audio",
+    "vendorUniqueID": "NoAu",
+    "pluginName": "SimpleDelay",
+    "pluginUniqueID": "NAds",
+    "publicVersion": "1.2.1",
+    "CFBundleIdentifierPrefix": "com.nonameaudio",
+    "hasGUI": false,
+    "isSynth": false,
+    "receivesMIDI": false,
+    "category": "effectImaging"
+}
