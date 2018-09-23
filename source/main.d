@@ -2,8 +2,7 @@
 Copyright: Guillaume Piolat 2015-2017.
 License:   $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
 */
-import std.math;
-import dplug.core, dplug.client, dplug.vst;
+import dplug.client : Parameter, Client, DLLEntryPoint, FloatParameter;
 
 version (unittest)
 {}
@@ -13,18 +12,19 @@ else
     mixin(DLLEntryPoint!());
 
     // This create the VST entry point
+    import dplug.vst;
     mixin(VSTEntryPoint!SimpleDelay);
 }
 
 enum size_t maxChannels = 2;
 
-enum : int
+enum Param : int
 {
-    paramOnOff,
-    paramDelayTimeSecondL,
-    paramDelayTimeSecondR,
-    paramDelayDryWetRatio,
-    paramDelayFeedbackRatio,
+    onOff,
+    delayTimeSecondL,
+    delayTimeSecondR,
+    delayDryWetRatio,
+    delayFeedbackRatio,
 }
 
 auto floatValue(scope const Parameter p) nothrow @nogc
@@ -37,8 +37,13 @@ auto floatValue(scope const Parameter p) nothrow @nogc
 }
 
 /// Simplest VST plugin you could make.
-final class SimpleDelay : dplug.client.Client
+final class SimpleDelay : Client
 {
+    import std.math : SQRT1_2, isNaN, fmax;
+    import dplug.core : mallocNew, makeVec;
+    import dplug.client :
+        IGraphics, PluginInfo, TimeInfo, LegalIO,
+        parsePluginInfo, LinearFloatParameter, BoolParameter;
 public:
     import ringbuffer;
     RingBuffer!float[2] _buffer;
@@ -47,6 +52,17 @@ public:
     double _sampleRate;
     size_t[maxChannels] _currentDelayTimeFrame;
 
+    override IGraphics createGraphics()
+    {
+        import gui : SimpleDelayGUI;
+        return mallocNew!SimpleDelayGUI(
+            this.param(Param.delayDryWetRatio),
+            this.param(Param.delayFeedbackRatio),
+            this.param(Param.delayTimeSecondL),
+            this.param(Param.delayTimeSecondR)
+        );
+    }
+    
     @property maxDelayTimeFrame() nothrow @nogc
     {
         return cast(size_t) (this.sampleRate * this.maxDelayTimeSecond);
@@ -61,7 +77,7 @@ public:
     @property delayTimeSecond(size_t ch)() nothrow @nogc
     {
         static assert(ch < maxChannels);
-        return this.param(paramDelayTimeSecondL + ch).floatValue;
+        return this.param(Param.delayTimeSecondL + ch).floatValue;
     }
 
     @property delayTimeFrame(size_t ch)() nothrow @nogc
@@ -71,12 +87,12 @@ public:
         
     @property delayDryWetRatio() nothrow @nogc
     {
-        return this.param(paramDelayDryWetRatio).floatValue;
+        return this.param(Param.delayDryWetRatio).floatValue;
     }
 
     @property delayFeedbackRatio() nothrow @nogc
     {
-        return this.param(paramDelayFeedbackRatio).floatValue;
+        return this.param(Param.delayFeedbackRatio).floatValue;
     }
 
     override PluginInfo buildPluginInfo()
@@ -91,17 +107,17 @@ public:
     override Parameter[] buildParameters()
     {
         auto params = makeVec!Parameter();
-        params.pushBack( mallocNew!BoolParameter(paramOnOff, "on/off", true) );
-        params.pushBack( mallocNew!LinearFloatParameter(paramDelayTimeSecondL,
+        params.pushBack( mallocNew!BoolParameter(Param.onOff, "on/off", true) );
+        params.pushBack( mallocNew!LinearFloatParameter(Param.delayTimeSecondL,
                                                         "L-ch second", "",
                                                         0.0, maxDelayTimeSecond, 0.1) );
-        params.pushBack( mallocNew!LinearFloatParameter(paramDelayTimeSecondR,
+        params.pushBack( mallocNew!LinearFloatParameter(Param.delayTimeSecondR,
                                                         "R-ch second", "",
                                                         0.0, maxDelayTimeSecond, 0.1) );
-        params.pushBack( mallocNew!LinearFloatParameter(paramDelayDryWetRatio,
+        params.pushBack( mallocNew!LinearFloatParameter(Param.delayDryWetRatio,
                                                         "dry/wet ratio", "",
                                                         0.0, 1.0, 0.5) );
-        params.pushBack( mallocNew!LinearFloatParameter(paramDelayFeedbackRatio,
+        params.pushBack( mallocNew!LinearFloatParameter(Param.delayFeedbackRatio,
                                                         "feedback ratio", "",
                                                         0.0, 1.0, 0.0) );
         return params.releaseData();
@@ -117,7 +133,6 @@ public:
     override int latencySamples(double sampleRate) nothrow @nogc
     {
         return 0;
-        // return cast(int) (maxDelayTimeSecond * this.sampleRate);
     }
 
     override float tailSizeInSeconds() nothrow @nogc
@@ -155,7 +170,7 @@ public:
         const fbk = this.delayFeedbackRatio;
         
         float[2] b;
-        if (readBoolParamValue(paramOnOff))
+        if (readBoolParamValue(Param.onOff))
         {
             foreach (t; 0 .. frames)
             {

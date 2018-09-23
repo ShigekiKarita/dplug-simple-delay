@@ -4,8 +4,8 @@
     "name": "simpledelay",
 
     "importPaths": [ "." ],
-    "sourcePaths": [ "." ],
-    "stringImportPaths": [ "." ],
+    "sourcePaths": [ "source" ],
+    "stringImportPaths": [ ".", "resource"],
 
     "targetType": "dynamicLibrary",
 
@@ -14,20 +14,13 @@
         "/nodefaultlib:msvcrt.lib",
         "/nodefaultlib:vcruntime.lib"
     ],
-
     "dflags-linux-dmd": ["-defaultlib=libphobos2.a"],
-
     "dflags-osx-ldc": ["-static"],
 
-    "comment-WARNING-READ-THIS-IS-IMPORTANT": [
-        "    When making your own plug-in you have to CHANGE THESE DEPENDENCY    ",
-        "    SPECIFICATIONS below from path-based to ~>MAJOR.MINOR               ",
-        "      Example: ~>7.0                                                    ",
-        "    See also the DUB documentation:                                     ",
-        "         https://code.dlang.org/package-format?lang=json#version-specs  "],
-    "dependencies":
-    {
+    "dependencies": {
         "dplug:vst": "~>7.1.2",
+        "dplug:gui": "~>7.1.2",
+        "dplug:pbr-widgets": "~>7.1.2"
     },
 
     "configurations": [

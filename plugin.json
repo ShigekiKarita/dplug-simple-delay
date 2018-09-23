@@ -5,9 +5,9 @@
     "vendorUniqueID": "NoAu",
     "pluginName": "SimpleDelay",
     "pluginUniqueID": "NAds",
-    "publicVersion": "1.2.1",
+    "publicVersion": "0.0.2",
     "CFBundleIdentifierPrefix": "com.nonameaudio",
-    "hasGUI": false,
+    "hasGUI": true,
     "isSynth": false,
     "receivesMIDI": false,
     "category": "effectImaging"
