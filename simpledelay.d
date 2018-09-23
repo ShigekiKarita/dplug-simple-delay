@@ -116,7 +116,8 @@ public:
 
     override int latencySamples(double sampleRate) nothrow @nogc
     {
-        return cast(int) (maxDelayTimeSecond * this.sampleRate);
+        return 0;
+        // return cast(int) (maxDelayTimeSecond * this.sampleRate);
     }
 
     override float tailSizeInSeconds() nothrow @nogc
