@@ -1,7 +1,9 @@
 /**
-Copyright: Guillaume Piolat 2015-2017.
+Copyright: Shigeki Karita, 2018
 License:   $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
 */
+module simpledelay;
+
 import dplug.client : Parameter, Client, DLLEntryPoint, FloatParameter;
 
 version (unittest)
@@ -54,8 +56,9 @@ public:
 
     override IGraphics createGraphics()
     {
-        import gui : SimpleDelayGUI;
-        return mallocNew!SimpleDelayGUI(
+        import gui : SimpleGUI;
+        return mallocNew!SimpleGUI(
+            this.param(Param.onOff),
             this.param(Param.delayDryWetRatio),
             this.param(Param.delayFeedbackRatio),
             this.param(Param.delayTimeSecondL),
@@ -126,6 +129,7 @@ public:
     override LegalIO[] buildLegalIO()
     {
         auto io = makeVec!LegalIO();
+        io.pushBack(LegalIO(1, 2));
         io.pushBack(LegalIO(2, 2));
         return io.releaseData();
     }
@@ -137,7 +141,7 @@ public:
 
     override float tailSizeInSeconds() nothrow @nogc
     {
-        return fmax(this.delayTimeSecond!0, this.delayTimeSecond!1);
+        return 0; // fmax(this.delayTimeSecond!0, this.delayTimeSecond!1);
     }
     
     override void reset(double sampleRate, int maxFrames, int numInputs, int numOutputs) nothrow @nogc
@@ -145,8 +149,8 @@ public:
         if (this._sampleRate != sampleRate)
         {
             this._sampleRate = sampleRate;
-            this._buffer[0] = RingBuffer!float(this.maxDelayTimeFrame);
-            this._buffer[1] = RingBuffer!float(this.maxDelayTimeFrame);
+            this._buffer[0] = RingBuffer!float(2 * this.maxDelayTimeFrame);
+            this._buffer[1] = RingBuffer!float(2 * this.maxDelayTimeFrame);
             this.resetInterval();
         }
     }
@@ -168,26 +172,29 @@ public:
     {
         const r = this.delayDryWetRatio;
         const fbk = this.delayFeedbackRatio;
-        
-        float[2] b;
+        this.resetInterval();
+        float[maxChannels] b;
         if (readBoolParamValue(Param.onOff))
         {
             foreach (t; 0 .. frames)
             {
-                this.resetInterval();
-                foreach (ch; 0 .. 2)
+                foreach (ch; 0 .. outputs.length)
                 {
+                    const ich = ch > inputs.length ? 0 : ch;
                     b[ch] = this._buffer[ch].front;
-                    this._buffer[ch].pushBack(inputs[ch][t] + b[ch] * fbk);
-                    outputs[ch][t] = ((1.0 - r) * inputs[ch][t] + r * b[ch]) * SQRT1_2;
                     this._buffer[ch].popFront();
+                    outputs[ch][t] = ((1.0 - r) * inputs[ich][t] + r * b[ch]); //  * SQRT1_2;
+                    this._buffer[ch].pushBack(inputs[ich][t] + b[ch] * fbk);
                 }
             }
         }
         else // bypass
         {
-            static foreach (ch; 0..2)
-                outputs[ch][0..frames] = inputs[ch][0..frames];
+            foreach (ch; 0.. outputs.length)
+            {
+                const ich = ch > inputs.length ? 0 : ch;
+                outputs[ch][0..frames] = inputs[ich][0..frames];
+            }
         }
     }
 }
