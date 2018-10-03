@@ -35,32 +35,33 @@ final class SimpleDelay : Client
 {
     import std.traits : EnumMembers;
     import std.math : SQRT1_2, isNaN, fmax;
+
     import gfm.math : box2i;
     import dplug.core : mallocNew, makeVec; //, destroyFree;
+    import dplug.pbrwidgets : UILabel;
     import dplug.client :
         IGraphics, PluginInfo, TimeInfo, LegalIO,
         parsePluginInfo, LinearFloatParameter, BoolParameter;
 
-public:
-    import ringbuffer;
+    import ringbuffer : RingBuffer;
     import gui : SimpleGUI;
-    RingBuffer!float[2] _buffer;
 
+public:
+
+    // audio related
+    RingBuffer!float[2] _buffer;
     enum float maxDelayTimeSecond = 10;
     double _sampleRate;
     size_t[maxChannels] _currentDelayTimeFrame;
+    int _numInputs = 2;
+
+    // GUI related
     SimpleGUI gui;
-    import dplug.pbrwidgets : UILabel;
     UILabel[EnumMembers!Param.length] labels;
+    char[100][this.labels.length] labelData;
 
-    bool isOn() @nogc nothrow
-    {
-        auto p = cast(BoolParameter) this.param(Param.onOff);
-        assert(p);
-        return p.value();
-    }
-
-    override IGraphics createGraphics()
+    // NOTE: this method will not call until GUI required (lazy)
+    override IGraphics createGraphics() @nogc nothrow
     {
         this.gui = mallocNew!(SimpleGUI)(
             this.param(Param.onOff),
@@ -69,20 +70,17 @@ public:
             this.param(Param.delayTimeSecondL),
             this.param(Param.delayTimeSecondR)
         );
+
         auto pos = box2i.rectangle(this.gui.marginW,
                                    this.gui.marginH,
                                    this.gui.kW,
                                    this.gui.marginH + 20);
-        this.labels[Param.onOff] = this.gui.addLabel(
-            this.isOn ? "ON" : "OFF", pos);
-
+        this.labels[Param.onOff] = this.gui.addLabel("", pos);
         int x = this.gui.marginW + this.gui.kW;
         foreach (i; Param.delayDryWetRatio .. Param.delayTimeSecondR + 1)
         {
-            auto p = box2i.rectangle(x,
-                                     this.gui.marginH,
-                                     this.gui.kW,
-                                     this.gui.marginH + 20);
+            auto p = box2i.rectangle(x, this.gui.marginH,
+                                     this.gui.kW, this.gui.marginH + 20);
             this.labels[i] = this.gui.addLabel("", p);
             x += this.gui.kW;
         }
@@ -111,17 +109,7 @@ public:
         return cast(size_t) (this.delayTimeSecond!ch * this.sampleRate);
     }
 
-    @property delayDryWetRatio() nothrow @nogc
-    {
-        return readFloatParamValue(Param.delayDryWetRatio);
-    }
-
-    @property delayFeedbackRatio() nothrow @nogc
-    {
-        return readFloatParamValue(Param.delayFeedbackRatio);
-    }
-
-    override PluginInfo buildPluginInfo()
+    override PluginInfo buildPluginInfo() nothrow @nogc
     {
         // Plugin info is parsed from plugin.json here at compile time.
         // Indeed it is strongly recommended that you do not fill PluginInfo
@@ -130,8 +118,9 @@ public:
         return pluginInfo;
     }
 
-    override Parameter[] buildParameters()
+    override Parameter[] buildParameters() nothrow @nogc
     {
+        // WARNING: this order depends on enum Param member order
         auto params = makeVec!Parameter();
         params.pushBack( mallocNew!BoolParameter(Param.onOff, "on/off", true) );
         params.pushBack( mallocNew!LinearFloatParameter(Param.delayDryWetRatio,
@@ -149,31 +138,27 @@ public:
         return params.releaseData();
     }
 
-    override LegalIO[] buildLegalIO()
+    override LegalIO[] buildLegalIO() nothrow @nogc
     {
         auto io = makeVec!LegalIO();
         io.pushBack(LegalIO(1, 2));
         io.pushBack(LegalIO(2, 2));
         return io.releaseData();
     }
-
-    override int latencySamples(double sampleRate) nothrow @nogc
-    {
-        return 0;
-    }
-
+    
     override float tailSizeInSeconds() nothrow @nogc
     {
-        return 0; // fmax(this.delayTimeSecond!0, this.delayTimeSecond!1);
+        return fmax(this.delayTimeSecond!0, this.delayTimeSecond!1);
     }
 
     override void reset(double sampleRate, int maxFrames, int numInputs, int numOutputs) nothrow @nogc
     {
+        this._numInputs = numInputs;
         if (this._sampleRate != sampleRate)
         {
             this._sampleRate = sampleRate;
-            this._buffer[0] = RingBuffer!float(2 * this.maxDelayTimeFrame);
-            this._buffer[1] = RingBuffer!float(2 * this.maxDelayTimeFrame);
+            this._buffer[0] = RingBuffer!float(this.maxDelayTimeFrame);
+            this._buffer[1] = RingBuffer!float(this.maxDelayTimeFrame);
             this.resetInterval();
         }
     }
@@ -191,51 +176,51 @@ public:
         }}
     }
 
-    char[100][this.labels.length] labelData;
-
-    void updateText(string fmt, Param i)()
+    void updateText(string fmt, Param i)() nothrow @nogc
     {
-        import std.string;
         auto s = snFormat!fmt(this.labelData[i], readFloatParamValue(i));
         this.labels[i].text(cast(string) s);
     }
 
     override void processAudio(const(float*)[] inputs, float*[]outputs, int frames, TimeInfo info) nothrow @nogc
     {
-        this.resetInterval();
         immutable isOn = readBoolParamValue(Param.onOff);
-        with (Param)
+        with (Param) // update GUI
         {
-            this.labels[onOff].text(isOn ? "ON" : "OFF");
-            this.updateText!("%6.2f", delayDryWetRatio);
-            this.updateText!("%6.2f", delayFeedbackRatio);
-            this.updateText!("%6.2f sec", delayTimeSecondL);
-            this.updateText!("%6.2f sec", delayTimeSecondR);
+            if (this.gui) {
+                this.labels[onOff].text(isOn ? "ON" : "OFF");
+                this.updateText!("%6.2f", delayDryWetRatio);
+                this.updateText!("%6.2f", delayFeedbackRatio);
+                this.updateText!("%6.2f sec", delayTimeSecondL);
+                this.updateText!("%6.2f sec", delayTimeSecondR);
+            }
         }
-        if (isOn)
+
+        immutable r = readFloatParamValue(Param.delayDryWetRatio);
+        if (isOn) // apply effect
         {
-            float[maxChannels] b;
-            const r = this.delayDryWetRatio;
-            const fbk = this.delayFeedbackRatio;
+            immutable fbk = readFloatParamValue(Param.delayFeedbackRatio);
+            this.resetInterval();
             foreach (t; 0 .. frames)
             {
-                foreach (ch; 0 .. outputs.length)
+                foreach (och; 0 .. outputs.length)
                 {
-                    const ich = ch > inputs.length ? 0 : ch;
-                    b[ch] = this._buffer[ch].front;
-                    this._buffer[ch].popFront();
-                    auto o = ((1.0 - r) * inputs[ich][t] + r * b[ch]); //  * SQRT1_2;
-                    outputs[ch][t] = o;
-                    this._buffer[ch].pushBack(o + b[ch] * (r * fbk - r));
+                    immutable ich = och < this._numInputs ? och : 0;
+                    immutable b = this._buffer[och].front;
+                    immutable i = (1.0 - r) * inputs[ich][t];
+                    immutable o = i + r * b; //  * SQRT1_2;
+                    outputs[och][t] = o;
+                    this._buffer[och].popFront();
+                    this._buffer[och].pushBack(i + b * r * fbk);
                 }
             }
         }
         else // bypass
         {
-            foreach (ch; 0.. outputs.length)
+            foreach (och; 0.. outputs.length)
             {
-                const ich = ch > inputs.length ? 0 : ch;
-                outputs[ch][0..frames] = inputs[ich][0..frames];
+                immutable ich = och < this._numInputs ? och : 0;
+                outputs[och][0..frames] = r * inputs[ich][0..frames];
             }
         }
     }
